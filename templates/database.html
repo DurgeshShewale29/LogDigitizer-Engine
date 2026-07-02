@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LogDigitizer - Full Database View</title>
+    <link href="/static/css/tailwind.css" rel="stylesheet">
+    <style>
+        body { background-color: #0d1117; color: #c9d1d9; font-family: 'Courier New', Courier, monospace; }
+        .cyber-border { border-color: #1f6feb; }
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #161b22; color: #8b949e; text-align: left; padding: 12px; border-bottom: 1px solid #30363d; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; }
+        td { padding: 12px; border-bottom: 1px solid #21262d; font-size: 13px; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        tr:hover { background-color: #1c2128; }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+    
+    <!-- Top Warning Banner -->
+    <div class="bg-red-900 text-red-100 py-1 text-center font-bold text-sm tracking-widest border-b border-red-700 shadow-md">
+        &#9888; HIGH SECURITY RESTRICTED ZONE - IOCL GUWAHATI REFINERY AIR-GAPPED ENVIRONMENT &#9888;
+    </div>
+
+    <!-- Main Header -->
+    <header class="bg-gray-900 cyber-border border-b px-6 py-4 flex justify-between items-center z-10 shadow-lg">
+        <div class="flex items-center space-x-4">
+            <a href="/" class="text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-600 px-3 py-1 rounded transition-colors text-xs font-bold tracking-widest flex items-center">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                BACK TO DASHBOARD
+            </a>
+            <div class="h-6 w-px bg-gray-700"></div>
+            <h1 class="text-xl font-bold text-white tracking-wider flex items-center">
+                DATABASE <span class="text-blue-400 ml-2">EXPLORER</span>
+            </h1>
+        </div>
+        <div class="flex items-center space-x-3">
+            <div class="text-xs text-gray-400 border border-gray-700 px-3 py-1 rounded bg-gray-800">
+                SYSTEM STATUS: <span class="text-green-400 font-bold">ONLINE</span>
+            </div>
+            <button onclick="sessionStorage.removeItem('ld_authenticated'); window.location.href='/';" class="bg-red-900 hover:bg-red-700 text-white border border-red-600 px-3 py-1 rounded text-xs font-bold tracking-widest transition-colors">
+                LOGOUT
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="flex-1 overflow-hidden flex flex-col bg-black p-6">
+        
+        <!-- Tabs -->
+        <div class="flex space-x-1 mb-4 border-b border-gray-800">
+            <button id="tab-docs" class="px-6 py-2 text-sm font-bold tracking-widest text-white bg-gray-800 border-t border-l border-r border-gray-600 rounded-t-lg transition-colors">
+                DOCUMENTS
+            </button>
+            <button id="tab-audit" class="px-6 py-2 text-sm font-bold tracking-widest text-gray-500 hover:text-white hover:bg-gray-800 transition-colors border-b border-gray-800">
+                AUDIT LOGS
+            </button>
+        </div>
+
+        <!-- Controls -->
+        <div class="mb-4 flex justify-between items-center">
+            <div class="flex items-center space-x-2 w-1/3">
+                <span class="text-green-500 font-mono text-lg">&gt;</span>
+                <input type="text" id="table-search" class="flex-1 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition-colors" placeholder="Filter records by keyword..." autocomplete="off">
+            </div>
+            <div class="flex items-center space-x-4">
+                <button id="delete-btn" class="hidden px-4 py-2 text-xs font-bold tracking-widest text-white bg-red-900 border border-red-700 hover:bg-red-700 rounded transition-colors shadow-lg">
+                    DELETE SELECTED (<span id="delete-count">0</span>)
+                </button>
+                <div class="text-xs text-gray-500 tracking-wider">
+                    TOTAL RECORDS: <span id="record-count" class="font-bold text-white">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Table Container -->
+        <div class="flex-1 overflow-auto border border-gray-800 rounded bg-[#090c10] shadow-inner relative">
+            <table id="db-table">
+                <thead>
+                    <tr>
+                        <!-- Populated by JS -->
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Populated by JS -->
+                </tbody>
+            </table>
+            
+            <div id="empty-state" class="absolute inset-0 flex flex-col items-center justify-center text-gray-600 hidden">
+                <svg class="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path>
+                </svg>
+                <p>DATABASE IS EMPTY</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inject data into JS -->
+    <script>
+        const rawDocs = {{ records | tojson | safe }};
+        const rawAudit = {{ audit_logs | default([]) | tojson | safe }};
+        
+        let currentTab = 'docs';
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            const tbody = document.querySelector('#db-table tbody');
+            const thead = document.querySelector('#db-table thead tr');
+            const searchInput = document.getElementById('table-search');
+            const countDisplay = document.getElementById('record-count');
+            const emptyState = document.getElementById('empty-state');
+            
+            const tabDocsBtn = document.getElementById('tab-docs');
+            const tabAuditBtn = document.getElementById('tab-audit');
+            const deleteBtn = document.getElementById('delete-btn');
+            const deleteCountSpan = document.getElementById('delete-count');
+            
+            let selectedIds = new Set();
+
+            function updateDeleteButton() {
+                if (selectedIds.size > 0) {
+                    deleteBtn.classList.remove('hidden');
+                    deleteCountSpan.textContent = selectedIds.size;
+                } else {
+                    deleteBtn.classList.add('hidden');
+                }
+            }
+
+            function switchTab(tab) {
+                currentTab = tab;
+                searchInput.value = '';
+                selectedIds.clear();
+                updateDeleteButton();
+                if (tab === 'docs') {
+                    tabDocsBtn.className = "px-6 py-2 text-sm font-bold tracking-widest text-white bg-gray-800 border-t border-l border-r border-gray-600 rounded-t-lg transition-colors";
+                    tabAuditBtn.className = "px-6 py-2 text-sm font-bold tracking-widest text-gray-500 hover:text-white hover:bg-gray-800 transition-colors border-b border-gray-800";
+                    renderTable(rawDocs, true);
+                } else {
+                    tabAuditBtn.className = "px-6 py-2 text-sm font-bold tracking-widest text-white bg-gray-800 border-t border-l border-r border-gray-600 rounded-t-lg transition-colors";
+                    tabDocsBtn.className = "px-6 py-2 text-sm font-bold tracking-widest text-gray-500 hover:text-white hover:bg-gray-800 transition-colors border-b border-gray-800";
+                    renderTable(rawAudit, false);
+                }
+            }
+            
+            tabDocsBtn.addEventListener('click', () => switchTab('docs'));
+            tabAuditBtn.addEventListener('click', () => switchTab('audit'));
+
+            function getColumns(dataArray) {
+                if (!dataArray || dataArray.length === 0) return [];
+                const allKeys = new Set();
+                
+                allKeys.add('SELECT');
+                
+                if (currentTab === 'docs') {
+                    allKeys.add('ACTION');
+                    ['DB_ID', 'Type', 'Filename', 'Timestamp'].forEach(k => allKeys.add(k));
+                } else {
+                    ['ID', 'Action', 'Details', 'Timestamp'].forEach(k => allKeys.add(k));
+                }
+                
+                dataArray.forEach(row => Object.keys(row).forEach(k => allKeys.add(k)));
+                return Array.from(allKeys);
+            }
+
+            function renderTable(data, isDocs) {
+                thead.innerHTML = '';
+                tbody.innerHTML = '';
+                
+                if (!data || data.length === 0) {
+                    emptyState.style.display = 'flex';
+                    countDisplay.textContent = 0;
+                    return;
+                }
+                emptyState.style.display = 'none';
+
+                const columns = getColumns(data);
+
+                // Render Headers
+                columns.forEach(col => {
+                    const th = document.createElement('th');
+                    if (col === 'SELECT') {
+                        th.style.width = '40px';
+                        th.style.textAlign = 'center';
+                        const selectAll = document.createElement('input');
+                        selectAll.type = 'checkbox';
+                        selectAll.className = 'w-4 h-4 cursor-pointer accent-blue-600';
+                        selectAll.addEventListener('change', (e) => {
+                            const isChecked = e.target.checked;
+                            const checkboxes = tbody.querySelectorAll('.row-checkbox');
+                            checkboxes.forEach(cb => {
+                                cb.checked = isChecked;
+                                const id = parseInt(cb.dataset.id);
+                                if (isChecked) selectedIds.add(id);
+                                else selectedIds.delete(id);
+                            });
+                            updateDeleteButton();
+                        });
+                        th.appendChild(selectAll);
+                    } else {
+                        th.textContent = col;
+                        if (col === 'ACTION') th.style.width = '100px';
+                    }
+                    thead.appendChild(th);
+                });
+
+                // Render Body
+                data.forEach(row => {
+                    const tr = document.createElement('tr');
+                    columns.forEach(col => {
+                        const td = document.createElement('td');
+                        
+                        if (col === 'SELECT') {
+                            td.style.textAlign = 'center';
+                            const cb = document.createElement('input');
+                            cb.type = 'checkbox';
+                            cb.className = 'row-checkbox w-4 h-4 cursor-pointer accent-blue-600';
+                            
+                            const rowId = isDocs ? row.DB_ID : row.ID;
+                            cb.dataset.id = rowId;
+                            if (selectedIds.has(rowId)) cb.checked = true;
+                            
+                            cb.addEventListener('change', (e) => {
+                                if (e.target.checked) selectedIds.add(rowId);
+                                else selectedIds.delete(rowId);
+                                updateDeleteButton();
+                            });
+                            td.appendChild(cb);
+                        } else if (col === 'ACTION' && isDocs) {
+                            td.innerHTML = `<a href="/api/download/${row.DB_ID}" class="bg-blue-800 hover:bg-blue-600 text-white px-3 py-1 rounded text-[10px] font-bold tracking-widest transition-colors inline-block text-center border border-blue-600 shadow-lg" download>DOWNLOAD</a>`;
+                        } else {
+                            const val = row[col];
+                            if (val !== undefined && val !== null) {
+                                if (typeof val === 'object') {
+                                    td.textContent = JSON.stringify(val).substring(0, 50) + '...';
+                                    td.title = JSON.stringify(val, null, 2);
+                                } else {
+                                    td.textContent = val;
+                                    td.title = val;
+                                }
+                            } else {
+                                td.textContent = '-';
+                                td.style.color = '#484f58';
+                            }
+                        }
+                        tr.appendChild(td);
+                    });
+                    tbody.appendChild(tr);
+                });
+                countDisplay.textContent = data.length;
+            }
+
+            // Search Filtering
+            searchInput.addEventListener('input', (e) => {
+                const term = e.target.value.toLowerCase();
+                const activeData = currentTab === 'docs' ? rawDocs : rawAudit;
+                const filtered = activeData.filter(row => {
+                    return Object.values(row).some(val => 
+                        String(val).toLowerCase().includes(term)
+                    );
+                });
+                renderTable(filtered, currentTab === 'docs');
+            });
+
+            // Delete Records Logic
+            deleteBtn.addEventListener('click', async () => {
+                if (selectedIds.size === 0) return;
+                
+                if (confirm(`Are you sure you want to delete ${selectedIds.size} records? This action cannot be undone.`)) {
+                    deleteBtn.textContent = 'DELETING...';
+                    deleteBtn.disabled = true;
+                    
+                    const endpoint = currentTab === 'docs' ? '/api/delete-records' : '/api/delete-audit-logs';
+                    
+                    try {
+                        const res = await fetch(endpoint, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ doc_ids: Array.from(selectedIds) })
+                        });
+                        
+                        if (res.ok) {
+                            // Reload page to get fresh data
+                            window.location.reload();
+                        } else {
+                            alert("Failed to delete records.");
+                            deleteBtn.textContent = `DELETE SELECTED (${selectedIds.size})`;
+                            deleteBtn.disabled = false;
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        alert("Error contacting server.");
+                        deleteBtn.textContent = `DELETE SELECTED (${selectedIds.size})`;
+                        deleteBtn.disabled = false;
+                    }
+                }
+            });
+
+            // Initial render
+            switchTab('docs');
+        });
+    </script>
+</body>
+</html>

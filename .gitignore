@@ -1,0 +1,50 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.eggs/
+
+# ── Virtual Environment ───────────────────────────────────────────────────────
+venv/
+env/
+.venv/
+.env/
+
+# ── Database (runtime data — not source code) ─────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── PyInstaller Build Output ──────────────────────────────────────────────────
+build/
+dist/
+*.spec.bak
+
+# ── SLM Binaries & Model (too large for git — deliver separately) ─────────────
+TinyLlama/
+
+# ── Tesseract Binaries (too large for git — deliver separately) ───────────────
+Tesseract-OCR/
+
+# ── OS & Editor Junk ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+.idea/
+.vscode/
+*.suo
+*.user
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Uploaded Files (runtime) ──────────────────────────────────────────────────
+uploads/
+temp/
+tmp/

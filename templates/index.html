@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LogDigitizer Enterprise Platform</title>
+    <!-- Local static tailwind -->
+    <link href="/static/css/tailwind.css" rel="stylesheet">
+    <style>
+        /* Cyber-industrial accents */
+        :root {
+            --cyber-green: #00ff41;
+            --cyber-dark: #0d1117;
+            --cyber-panel: #161b22;
+            --cyber-border: #30363d;
+        }
+        body {
+            background-color: var(--cyber-dark);
+            color: #c9d1d9;
+            font-family: 'Consolas', 'Courier New', monospace; /* Monospace for industrial feel */
+        }
+        .cyber-border {
+            border: 1px solid var(--cyber-border);
+        }
+        .cyber-glow:focus {
+            outline: none;
+            border-color: var(--cyber-green);
+            box-shadow: 0 0 8px rgba(0, 255, 65, 0.4);
+        }
+        /* Custom scrollbar for webkit */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--cyber-dark);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--cyber-border);
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+    <!-- LOGIN OVERLAY: full-screen block, all critical styles are inline to avoid Tailwind JIT dependency -->
+    <div id="login-overlay" style="
+        position: fixed; inset: 0; z-index: 9999;
+        display: flex; align-items: center; justify-content: center;
+        background: #0d1117;
+        transition: opacity 0.5s ease;
+    ">
+        <!-- Scanline texture -->
+        <div style="position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,255,65,0.015) 2px,rgba(0,255,65,0.015) 4px);"></div>
+
+        <!-- Login card -->
+        <div style="position:relative;width:100%;max-width:420px;margin:0 16px;">
+
+            <!-- Top classification banner -->
+            <div style="background:#7f1d1d;border:1px solid #dc2626;color:#fee2e2;text-align:center;font-size:11px;font-weight:700;padding:8px;letter-spacing:0.15em;text-transform:uppercase;border-radius:8px 8px 0 0;">
+                &#9888; RESTRICTED SYSTEM ACCESS &#9888;
+            </div>
+
+            <!-- Card body -->
+            <div style="background:#111827;border:1px solid #22c55e;border-top:none;border-radius:0 0 8px 8px;padding:32px;box-shadow:0 0 40px rgba(0,255,65,0.18);">
+
+                <!-- Logo -->
+                <div style="text-align:center;margin-bottom:28px;">
+                    <div style="display:flex;justify-content:center;align-items:center;gap:6px;margin-bottom:10px;">
+                        <div style="width:8px;height:8px;background:#22c55e;border-radius:50%;animation:pulse 1.5s infinite;"></div>
+                        <div style="width:11px;height:11px;background:#4ade80;border-radius:50%;animation:pulse 1.5s 0.2s infinite;"></div>
+                        <div style="width:8px;height:8px;background:#22c55e;border-radius:50%;animation:pulse 1.5s 0.4s infinite;"></div>
+                    </div>
+                    <h1 style="font-size:22px;font-weight:700;color:#fff;letter-spacing:0.1em;">LOG<span style="color:#4ade80;">DIGITIZER</span></h1>
+                    <p style="font-size:10px;color:#6b7280;margin-top:4px;letter-spacing:0.15em;text-transform:uppercase;">Enterprise Platform v1.0 // Air-Gapped</p>
+                </div>
+
+                <!-- Prompt -->
+                <p style="color:#22c55e;font-size:11px;font-family:monospace;margin-bottom:16px;">&gt; Authenticate to continue...</p>
+
+                <!-- Username -->
+                <div style="margin-bottom:14px;">
+                    <label style="display:block;font-size:10px;color:#9ca3af;margin-bottom:5px;letter-spacing:0.12em;text-transform:uppercase;" for="login-username">Operator ID</label>
+                    <div id="user-wrap" style="display:flex;align-items:center;background:#000;border:1px solid #374151;border-radius:4px;transition:border-color 0.2s;">
+                        <span style="color:#22c55e;font-family:monospace;padding:0 12px;font-size:14px;user-select:none;">&gt;</span>
+                        <input type="text" id="login-username" autocomplete="off" spellcheck="false"
+                            placeholder="Enter operator ID"
+                            style="flex:1;background:transparent;color:#fff;font-family:monospace;font-size:13px;padding:11px 12px 11px 0;border:none;outline:none;"
+                        >
+                    </div>
+                </div>
+
+                <!-- Password -->
+                <div style="margin-bottom:22px;">
+                    <label style="display:block;font-size:10px;color:#9ca3af;margin-bottom:5px;letter-spacing:0.12em;text-transform:uppercase;" for="login-password">Access Code</label>
+                    <div id="pass-wrap" style="display:flex;align-items:center;background:#000;border:1px solid #374151;border-radius:4px;transition:border-color 0.2s;">
+                        <span style="color:#22c55e;font-family:monospace;padding:0 12px;font-size:14px;user-select:none;">&gt;</span>
+                        <input type="text" id="login-password" autocomplete="new-password" spellcheck="false"
+                            placeholder="Enter access code"
+                            style="flex:1;background:transparent;color:#fff;font-family:monospace;font-size:13px;padding:11px 12px 11px 0;border:none;outline:none;-webkit-text-security:disc;"
+                        >
+                    </div>
+                </div>
+
+                <!-- Error -->
+                <div id="login-error" style="display:none;margin-bottom:14px;padding:8px 12px;background:#450a0a;border:1px solid #b91c1c;border-radius:4px;color:#f87171;font-weight:700;font-family:monospace;font-size:11px;letter-spacing:0.05em;text-align:center;">
+                    ACCESS DENIED - INVALID CREDENTIALS
+                </div>
+
+                <!-- Button -->
+                <button id="login-btn" style="width:100%;background:#14532d;color:#86efac;font-family:monospace;font-weight:700;font-size:13px;padding:12px;border:1px solid #16a34a;border-radius:4px;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;transition:background 0.2s,color 0.2s;"
+                    onmouseover="this.style.background='#166534';this.style.color='#fff';"
+                    onmouseout="this.style.background='#14532d';this.style.color='#86efac';"
+                >
+                    SYSTEM LOGIN
+                </button>
+
+                <!-- Footer -->
+                <p style="text-align:center;color:#374151;font-size:9px;margin-top:20px;font-family:monospace;letter-spacing:0.1em;">
+                    IOCL GUWAHATI REFINERY // AUTHORISED PERSONNEL ONLY
+                </p>
+            </div>
+        </div>
+    </div>
+    <!-- END LOGIN OVERLAY -->
+    
+    <!-- Top Warning Banner -->
+    <div class="bg-red-900 text-red-100 py-1 text-center font-bold text-sm tracking-widest border-b border-red-700 shadow-md">
+        &#9888; HIGH SECURITY RESTRICTED ZONE - IOCL GUWAHATI REFINERY AIR-GAPPED ENVIRONMENT &#9888;
+    </div>
+
+    <!-- Main Header -->
+    <header class="bg-gray-900 cyber-border border-b px-6 py-4 flex justify-between items-center z-10">
+        <div class="flex items-center space-x-3">
+            <div class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+            <h1 class="text-xl font-bold text-white tracking-wider">LOG<span class="text-green-400">DIGITIZER</span> ENGINE</h1>
+        </div>
+        <div class="flex items-center space-x-3">
+            <div class="text-xs text-gray-400 border border-gray-700 px-3 py-1 rounded bg-gray-800">
+                SYSTEM STATUS: <span class="text-green-400 font-bold">ONLINE</span>
+            </div>
+            <button onclick="sessionStorage.removeItem('ld_authenticated'); window.location.reload();" class="bg-red-900 hover:bg-red-700 text-white border border-red-600 px-3 py-1 rounded text-xs font-bold tracking-widest transition-colors">
+                LOGOUT
+            </button>
+        </div>
+    </header>
+
+    <!-- Content Layout -->
+    <div class="flex flex-1 overflow-hidden">
+        
+        <!-- Left Panel: Upload Zone -->
+        <aside class="w-80 bg-gray-900 cyber-border border-r p-6 flex flex-col z-0 shadow-lg">
+            <h2 class="text-sm font-semibold text-gray-300 mb-4 tracking-wide uppercase">Batch Ingestion</h2>
+            
+            <!-- Drag & Drop Area -->
+            <div id="drop-zone" class="border-2 border-dashed border-gray-600 rounded-lg p-6 text-center cursor-pointer hover:border-green-400 hover:bg-gray-800 transition-all flex-1 flex flex-col justify-center items-center">
+                <svg class="w-12 h-12 text-gray-500 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+                </svg>
+                <p class="text-sm text-gray-400">Click or Drag & Drop</p>
+                <p class="text-xs text-gray-500 mt-1">.pdf, .png, .jpg, .docx, .doc</p>
+                <input type="file" id="file-input" class="hidden" multiple accept=".pdf,.png,.jpg,.jpeg,.docx,.doc">
+            </div>
+
+            <div class="mt-4">
+                <h3 class="text-xs font-bold text-gray-500 mb-2 uppercase">Processing Queue</h3>
+                <ul id="upload-queue" class="text-xs space-y-2 overflow-y-auto max-h-40">
+                    <!-- Dynamic queue items go here -->
+                </ul>
+            </div>
+
+            <!-- Export Block -->
+            <div class="mt-auto pt-6 border-t border-gray-800">
+                <h3 class="text-xs font-bold text-gray-500 mb-2 uppercase">Data Export</h3>
+                <select id="export-doc-type" class="bg-gray-800 text-white border border-gray-600 rounded px-3 py-2 text-sm cyber-glow transition-all w-full mb-3">
+                    <option value="Shift Handover Log">Shift Handover Log</option>
+                    <option value="Tool Broken Report">Tool Broken Report</option>
+                    <option value="General Asset Log">General Asset Log</option>
+                </select>
+                <button id="export-btn" class="w-full bg-blue-800 hover:bg-blue-600 text-white px-4 py-2 rounded text-sm font-bold tracking-wide transition-colors mb-3">
+                    EXPORT TO EXCEL
+                </button>
+                <button id="view-db-btn" class="w-full bg-green-900 hover:bg-green-700 text-green-100 border border-green-600 px-4 py-2 rounded text-sm font-bold tracking-wide transition-colors" onclick="window.location.href='/database'">
+                    VIEW FULL DATABASE
+                </button>
+            </div>
+        </aside>
+
+        <!-- Right Panel: Document Blocks -->
+        <main class="flex-1 bg-black p-6 overflow-y-auto relative" id="document-container">
+            <div id="empty-state" class="absolute inset-0 flex items-center justify-center text-gray-600 flex-col">
+                <svg class="w-16 h-16 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                <p>Awaiting Document Ingestion...</p>
+            </div>
+            
+            <!-- Document Blocks will be injected here by app.js -->
+        </main>
+    </div>
+
+    <!-- Template for Document Block (Invisible, used by JS) -->
+    <template id="doc-block-template">
+        <div class="document-block cyber-border bg-gray-900 rounded-lg mb-6 overflow-hidden flex shadow-lg border border-gray-700 transition-all duration-300">
+            
+            <!-- Left: Document Preview -->
+            <div class="w-1/3 border-r border-gray-700 bg-black flex items-center justify-center p-4 relative group">
+                <div class="absolute top-2 left-2 bg-gray-800 text-xs px-2 py-1 rounded border border-gray-600 text-gray-400 doc-filename truncate max-w-[90%]">
+                    filename.ext
+                </div>
+                <!-- Placeholder for actual file preview -->
+                <div class="text-gray-600 text-sm flex flex-col items-center">
+                    <svg class="w-12 h-12 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                    </svg>
+                    <span>Secure Preview Rendered</span>
+                </div>
+            </div>
+
+            <!-- Right: Dynamic Form Panel -->
+            <div class="w-2/3 p-5 flex flex-col bg-gray-900 relative">
+                <!-- Status Badge -->
+                <div class="absolute top-4 right-4 flex space-x-2">
+                    <span class="doc-confidence text-xs font-bold px-2 py-1 rounded bg-green-900 text-green-400 border border-green-700">
+                        CONF: 99%
+                    </span>
+                    <button class="remove-block-btn text-gray-500 hover:text-red-400 transition-colors" title="Discard">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+                
+                <h3 class="doc-type text-lg font-bold text-green-400 mb-1">Document Type</h3>
+                <p class="text-xs text-gray-500 mb-4 pb-2 border-b border-gray-800 doc-message">Processed successfully.</p>
+                
+                <!-- Dynamic Form Fields Container -->
+                <form class="dynamic-form grid grid-cols-2 gap-4 flex-1">
+                    <!-- Inputs injected here -->
+                </form>
+
+                <div class="mt-4 pt-4 border-t border-gray-800 flex justify-end">
+                    <button type="button" class="bg-green-700 hover:bg-green-600 text-white px-4 py-2 rounded text-sm font-bold tracking-wide transition-colors">
+                        COMMIT RECORD
+                    </button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- Chat Terminal -->
+    <div id="chat-terminal" class="fixed bottom-0 right-4 w-96 bg-gray-900 border border-green-500 rounded-t-lg shadow-2xl overflow-hidden flex flex-col z-50 transition-all duration-300 ease-in-out" style="transform: translateY(calc(100% - 40px));">
+        <!-- Header -->
+        <div id="chat-header" class="bg-gray-800 p-2 h-[40px] cursor-pointer flex justify-between items-center border-b border-gray-700">
+            <div class="flex items-center text-green-400 font-bold text-xs uppercase tracking-widest">
+                <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+                DB Query Terminal
+            </div>
+            <span id="chat-toggle-icon" class="text-gray-400">▲</span>
+        </div>
+        
+        <!-- Messages Area -->
+        <div id="chat-messages" class="p-4 overflow-y-auto space-y-4 h-80 bg-black text-xs font-mono text-gray-300">
+            <div class="text-green-500">> System initialized. Offline NLP engine ready. Query database using natural language.</div>
+        </div>
+        
+        <!-- Input Area -->
+        <div class="p-2 bg-gray-800 border-t border-gray-700 flex items-center">
+            <span class="text-green-500 mr-2 font-mono">></span>
+            <input type="text" id="chat-input" class="flex-1 bg-transparent border-none text-white focus:outline-none text-xs font-mono placeholder-gray-600" placeholder="E.g., Show me broken tools..." autocomplete="off">
+        </div>
+    </div>
+
+    <script src="/static/js/app.js?v=4"></script>
+</body>
+</html>
