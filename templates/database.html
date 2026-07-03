@@ -8,10 +8,42 @@
     <style>
         body { background-color: #0d1117; color: #c9d1d9; font-family: 'Courier New', Courier, monospace; }
         .cyber-border { border-color: #1f6feb; }
-        table { width: 100%; border-collapse: collapse; }
-        th { background: #161b22; color: #8b949e; text-align: left; padding: 12px; border-bottom: 1px solid #30363d; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; }
-        td { padding: 12px; border-bottom: 1px solid #21262d; font-size: 13px; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        table { width: 100%; border-collapse: collapse; table-layout: auto; }
+        th { background: #161b22; color: #8b949e; text-align: left; padding: 12px; border-bottom: 1px solid #30363d; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; white-space: nowrap; }
+        td { padding: 10px 12px; border-bottom: 1px solid #21262d; font-size: 12px; max-width: 260px; white-space: normal; word-break: break-word; vertical-align: top; line-height: 1.5; }
+        td.expandable { cursor: pointer; }
+        td.expandable:hover { color: #58a6ff; text-decoration: underline dotted; }
         tr:hover { background-color: #1c2128; }
+        td.action-col { white-space: nowrap; width: 220px; vertical-align: middle; }
+        .dl-btn, .view-btn {
+            display: inline-flex; align-items: center; gap: 5px;
+            color: #fff; border-radius: 5px;
+            padding: 5px 10px; font-size: 10px; font-weight: 700;
+            letter-spacing: .08em; text-decoration: none; transition: all .2s;
+        }
+        .dl-btn {
+            background: linear-gradient(135deg, #1a3a6b, #1f6feb);
+            border: 1px solid #388bfd;
+            box-shadow: 0 0 8px rgba(31,111,235,.3);
+        }
+        .view-btn {
+            background: linear-gradient(135deg, #14472d, #2ea043);
+            border: 1px solid #3fb950;
+            box-shadow: 0 0 8px rgba(46,160,67,.3);
+            margin-right: 5px;
+        }
+        .dl-btn:hover { background: linear-gradient(135deg, #1f6feb, #388bfd); box-shadow: 0 0 14px rgba(56,139,253,.5); }
+        .view-btn:hover { background: linear-gradient(135deg, #2ea043, #3fb950); box-shadow: 0 0 14px rgba(63,185,80,.5); }
+
+        /* Full-content modal */
+        #cell-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.75); z-index:9999; align-items:center; justify-content:center; }
+        #cell-modal.open { display:flex; }
+        #cell-modal-box { background:#161b22; border:1px solid #30363d; border-radius:8px; max-width:680px; width:90%; max-height:75vh; display:flex; flex-direction:column; box-shadow:0 0 40px rgba(0,0,0,.8); }
+        #cell-modal-header { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid #30363d; }
+        #cell-modal-title { font-size:12px; font-weight:700; letter-spacing:.1em; color:#8b949e; text-transform:uppercase; }
+        #cell-modal-close { background:none; border:none; color:#8b949e; cursor:pointer; font-size:20px; line-height:1; }
+        #cell-modal-close:hover { color:#fff; }
+        #cell-modal-body { padding:18px; overflow-y:auto; font-size:13px; color:#c9d1d9; white-space:pre-wrap; word-break:break-word; line-height:1.7; }
     </style>
 </head>
 <body class="h-screen flex flex-col overflow-hidden">
@@ -47,11 +79,11 @@
     <div class="flex-1 overflow-hidden flex flex-col bg-black p-6">
         
         <!-- Tabs -->
-        <div class="flex space-x-1 mb-4 border-b border-gray-800">
-            <button id="tab-docs" class="px-6 py-2 text-sm font-bold tracking-widest text-white bg-gray-800 border-t border-l border-r border-gray-600 rounded-t-lg transition-colors">
-                DOCUMENTS
+        <div class="flex flex-wrap gap-1 mb-4 border-b border-gray-800" id="tab-bar">
+            <button id="tab-docs" class="px-5 py-2 text-sm font-bold tracking-widest text-white bg-gray-800 border-t border-l border-r border-gray-600 rounded-t-lg transition-colors">
+                ALL DOCUMENTS
             </button>
-            <button id="tab-audit" class="px-6 py-2 text-sm font-bold tracking-widest text-gray-500 hover:text-white hover:bg-gray-800 transition-colors border-b border-gray-800">
+            <button id="tab-audit" class="px-5 py-2 text-sm font-bold tracking-widest text-gray-500 hover:text-white hover:bg-gray-800 transition-colors border-b border-gray-800">
                 AUDIT LOGS
             </button>
         </div>
@@ -94,13 +126,56 @@
         </div>
     </div>
 
+    <!-- Full-Content Modal -->
+    <div id="cell-modal">
+        <div id="cell-modal-box">
+            <div id="cell-modal-header">
+                <span id="cell-modal-title">FIELD VALUE</span>
+                <button id="cell-modal-close" onclick="document.getElementById('cell-modal').classList.remove('open')">&times;</button>
+            </div>
+            <div id="cell-modal-body"></div>
+        </div>
+    </div>
+
+    <!-- Document View Modal (mimics ingestion UI) -->
+    <div id="doc-view-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:9998; align-items:center; justify-content:center; padding: 20px;">
+        <div class="cyber-border bg-gray-900 rounded-lg overflow-hidden flex shadow-lg border border-gray-700" style="width: 100%; max-width: 1000px; max-height: 90vh; position: relative; flex-direction: column;">
+            <button onclick="document.getElementById('doc-view-modal').style.display='none'" class="absolute top-4 right-4 text-gray-500 hover:text-white z-50">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+            <div class="w-full p-6 flex flex-col bg-gray-900 overflow-y-auto">
+                <h3 id="doc-view-type" class="text-xl font-bold text-green-400 mb-1">Document Type</h3>
+                <p id="doc-view-meta" class="text-xs text-gray-500 mb-6 pb-2 border-b border-gray-800">Metadata</p>
+                
+                <form id="doc-view-form" class="dynamic-form grid grid-cols-2 gap-6 flex-1">
+                    <!-- Read-only inputs injected here -->
+                </form>
+            </div>
+        </div>
+    </div>
+
     <!-- Inject data into JS -->
     <script>
         const rawDocs = {{ records | tojson | safe }};
         const rawAudit = {{ audit_logs | default([]) | tojson | safe }};
-        
+        const serverDocTypes = {{ doc_types | default([]) | tojson | safe }};
+
         let currentTab = 'docs';
-        
+        let dbSchema = {};  // keyed by doc_type → { columns, rows }
+
+        // Fetch typed-table schema from server
+        fetch('/api/db-schema').then(r => r.json()).then(data => {
+            dbSchema = data;
+        }).catch(() => {});
+
+        function setActiveTab(id) {
+            document.querySelectorAll('#tab-bar button').forEach(b => {
+                b.className = 'px-5 py-2 text-sm font-bold tracking-widest text-gray-400 hover:text-white hover:bg-gray-800 transition-colors border-b border-gray-800';
+            });
+            const active = document.getElementById(id) || document.querySelector(`[data-doctype="${id}"]`);
+            if (active) active.className = 'px-5 py-2 text-sm font-bold tracking-widest text-white bg-gray-800 border-t border-l border-r border-gray-600 rounded-t-lg transition-colors';
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             const tbody = document.querySelector('#db-table tbody');
             const thead = document.querySelector('#db-table thead tr');
@@ -124,22 +199,30 @@
                 }
             }
 
-            function switchTab(tab) {
+            function switchTab(tab, docType) {
                 currentTab = tab;
                 searchInput.value = '';
                 selectedIds.clear();
                 updateDeleteButton();
+                setActiveTab(tab === 'docs' ? 'tab-docs' : tab === 'audit' ? 'tab-audit' : docType);
+
                 if (tab === 'docs') {
-                    tabDocsBtn.className = "px-6 py-2 text-sm font-bold tracking-widest text-white bg-gray-800 border-t border-l border-r border-gray-600 rounded-t-lg transition-colors";
-                    tabAuditBtn.className = "px-6 py-2 text-sm font-bold tracking-widest text-gray-500 hover:text-white hover:bg-gray-800 transition-colors border-b border-gray-800";
                     renderTable(rawDocs, true);
-                } else {
-                    tabAuditBtn.className = "px-6 py-2 text-sm font-bold tracking-widest text-white bg-gray-800 border-t border-l border-r border-gray-600 rounded-t-lg transition-colors";
-                    tabDocsBtn.className = "px-6 py-2 text-sm font-bold tracking-widest text-gray-500 hover:text-white hover:bg-gray-800 transition-colors border-b border-gray-800";
+                } else if (tab === 'audit') {
                     renderTable(rawAudit, false);
+                } else if (tab === 'typed' && docType) {
+                    // Use real SQL rows from the typed table
+                    const schemaEntry = dbSchema[docType];
+                    if (schemaEntry && schemaEntry.rows.length > 0) {
+                        renderTypedTable(schemaEntry.rows, schemaEntry.columns, docType);
+                    } else {
+                        // Fallback: filter from rawDocs
+                        const filtered = rawDocs.filter(r => r.Type === docType);
+                        renderTable(filtered, true);
+                    }
                 }
             }
-            
+
             tabDocsBtn.addEventListener('click', () => switchTab('docs'));
             tabAuditBtn.addEventListener('click', () => switchTab('audit'));
 
@@ -224,16 +307,39 @@
                             });
                             td.appendChild(cb);
                         } else if (col === 'ACTION' && isDocs) {
-                            td.innerHTML = `<a href="/api/download/${row.DB_ID}" class="bg-blue-800 hover:bg-blue-600 text-white px-3 py-1 rounded text-[10px] font-bold tracking-widest transition-colors inline-block text-center border border-blue-600 shadow-lg" download>DOWNLOAD</a>`;
+                            td.classList.add('action-col');
+                            td.innerHTML = `
+                                <button onclick='openFullView(${JSON.stringify(row).replace(/'/g, "&#39;")}, false)' class="view-btn">
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                                    VIEW
+                                </button>
+                                <a href="/api/download/${row.DB_ID}" class="dl-btn" download>
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                    DOWNLOAD
+                                </a>
+                            `;
                         } else {
                             const val = row[col];
                             if (val !== undefined && val !== null) {
+                                let displayVal;
+                                let fullVal;
                                 if (typeof val === 'object') {
-                                    td.textContent = JSON.stringify(val).substring(0, 50) + '...';
-                                    td.title = JSON.stringify(val, null, 2);
+                                    fullVal = JSON.stringify(val, null, 2);
+                                    displayVal = fullVal;
                                 } else {
-                                    td.textContent = val;
-                                    td.title = val;
+                                    fullVal = String(val);
+                                    displayVal = fullVal;
+                                }
+                                td.textContent = displayVal;
+                                // Make long cells clickable to open full-content modal
+                                if (fullVal.length > 60) {
+                                    td.classList.add('expandable');
+                                    td.title = 'Click to view full content';
+                                    td.addEventListener('click', () => {
+                                        document.getElementById('cell-modal-title').textContent = col.toUpperCase();
+                                        document.getElementById('cell-modal-body').textContent = fullVal;
+                                        document.getElementById('cell-modal').classList.add('open');
+                                    });
                                 }
                             } else {
                                 td.textContent = '-';
@@ -250,13 +356,26 @@
             // Search Filtering
             searchInput.addEventListener('input', (e) => {
                 const term = e.target.value.toLowerCase();
-                const activeData = currentTab === 'docs' ? rawDocs : rawAudit;
-                const filtered = activeData.filter(row => {
-                    return Object.values(row).some(val => 
-                        String(val).toLowerCase().includes(term)
-                    );
-                });
-                renderTable(filtered, currentTab === 'docs');
+                let activeData, isDocs;
+                if (currentTab === 'docs') {
+                    activeData = rawDocs; isDocs = true;
+                } else if (currentTab === 'audit') {
+                    activeData = rawAudit; isDocs = false;
+                } else {
+                    // typed tab — search within typed rows
+                    const schemaEntry = Object.values(dbSchema).find((_, i) => Object.keys(dbSchema)[i] === currentTab);
+                    if (schemaEntry) {
+                        const filtered = schemaEntry.rows.filter(row =>
+                            Object.values(row).some(val => String(val).toLowerCase().includes(term))
+                        );
+                        renderTypedTable(filtered, schemaEntry.columns, currentTab);
+                    }
+                    return;
+                }
+                const filtered = activeData.filter(row =>
+                    Object.values(row).some(val => String(val).toLowerCase().includes(term))
+                );
+                renderTable(filtered, isDocs);
             });
 
             // Delete Records Logic
@@ -292,6 +411,179 @@
                     }
                 }
             });
+
+            // ── renderTypedTable: shows real SQL columns per document type ──────
+            function toTitleCase(str) {
+                return str.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            }
+
+            function renderTypedTable(rows, columns, docType) {
+                thead.innerHTML = '';
+                tbody.innerHTML = '';
+                if (!rows || rows.length === 0) {
+                    emptyState.style.display = 'flex';
+                    countDisplay.textContent = 0;
+                    return;
+                }
+                emptyState.style.display = 'none';
+
+                // Skip internal cols (id, doc_id) from display
+                const displayCols = columns.filter(c => c !== 'id' && c !== 'doc_id');
+
+                // Header
+                displayCols.forEach(col => {
+                    const th = document.createElement('th');
+                    th.textContent = toTitleCase(col);
+                    if (col === 'filename') th.style.maxWidth = '140px';
+                    thead.appendChild(th);
+                });
+                const thAction = document.createElement('th');
+                thAction.textContent = 'ACTION';
+                thead.appendChild(thAction);
+
+                // Rows
+                rows.forEach(row => {
+                    const tr = document.createElement('tr');
+                    displayCols.forEach(col => {
+                        const td = document.createElement('td');
+                        const val = row[col];
+                        if (val !== null && val !== undefined && String(val).trim()) {
+                            const fullVal = String(val);
+                            td.textContent = fullVal;
+                            if (fullVal.length > 60) {
+                                td.classList.add('expandable');
+                                td.title = 'Click to view full content';
+                                td.addEventListener('click', () => {
+                                    document.getElementById('cell-modal-title').textContent = toTitleCase(col);
+                                    document.getElementById('cell-modal-body').textContent = fullVal;
+                                    document.getElementById('cell-modal').classList.add('open');
+                                });
+                            }
+                        } else {
+                            td.textContent = '—';
+                            td.style.color = '#484f58';
+                        }
+                        tr.appendChild(td);
+                    });
+
+                    // Typed Action Column
+                    const tdAction = document.createElement('td');
+                    tdAction.classList.add('action-col');
+                    const realDocId = row.doc_id;
+                    tdAction.innerHTML = `
+                        <button onclick='openFullView(${JSON.stringify(row).replace(/'/g, "&#39;")}, true, "${docType}")' class="view-btn">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            VIEW
+                        </button>
+                        <a href="/api/download/${realDocId}" class="dl-btn" download>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            DOWNLOAD
+                        </a>
+                    `;
+                    tr.appendChild(tdAction);
+                    
+                    tbody.appendChild(tr);
+                });
+                countDisplay.textContent = rows.length;
+            }
+
+            // Global function to open Full View modal
+            window.openFullView = function(row, isTyped, dt = "") {
+                const modal = document.getElementById('doc-view-modal');
+                const form = document.getElementById('doc-view-form');
+                
+                const type = isTyped ? dt : row.Type;
+                const filename = row.Filename || row.filename;
+                const ts = row.Timestamp || row.timestamp;
+                
+                document.getElementById('doc-view-type').textContent = type;
+                document.getElementById('doc-view-meta').textContent = `File: ${filename}  |  Parsed at: ${ts}`;
+                
+                form.innerHTML = '';
+                
+                // Exclude system fields
+                const excludeKeys = ['DB_ID', 'id', 'doc_id', 'Type', 'Filename', 'filename', 'Timestamp', 'timestamp'];
+                
+                Object.keys(row).forEach(key => {
+                    if (excludeKeys.includes(key)) return;
+                    
+                    let val = row[key];
+                    const label = toTitleCase(key);
+                    
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'flex flex-col';
+                    
+                    const labelEl = document.createElement('label');
+                    labelEl.className = 'text-xs font-bold text-gray-500 mb-1 uppercase tracking-wider';
+                    labelEl.textContent = label;
+                    wrapper.appendChild(labelEl);
+                    
+                    // Table rendering
+                    if (key.toLowerCase().includes('grid') || key.toLowerCase().includes('table')) {
+                        wrapper.className = 'flex flex-col col-span-2';
+                        try {
+                            if (typeof val === 'string') {
+                                val = JSON.parse(val.replace(/'/g, '"'));
+                            }
+                        } catch (e) {}
+                        
+                        if (Array.isArray(val) && val.length > 0) {
+                            const table = document.createElement('table');
+                            table.className = 'w-full text-xs text-left text-gray-300 border border-gray-700';
+                            const trHead = document.createElement('tr');
+                            trHead.className = 'bg-gray-800 text-green-400 font-bold uppercase tracking-wider border-b border-gray-700';
+                            
+                            const tableCols = Object.keys(val[0]);
+                            tableCols.forEach(tc => {
+                                const th = document.createElement('th');
+                                th.className = 'px-3 py-2';
+                                th.textContent = tc;
+                                trHead.appendChild(th);
+                            });
+                            table.appendChild(trHead);
+                            
+                            val.forEach(r => {
+                                const tr = document.createElement('tr');
+                                tr.className = 'border-b border-gray-800 hover:bg-gray-800 transition-colors';
+                                tableCols.forEach(tc => {
+                                    const td = document.createElement('td');
+                                    td.className = 'px-3 py-2 font-mono';
+                                    td.textContent = r[tc];
+                                    tr.appendChild(td);
+                                });
+                                table.appendChild(tr);
+                            });
+                            wrapper.appendChild(table);
+                        } else {
+                             const p = document.createElement('p');
+                             p.className = 'text-sm text-gray-400 italic';
+                             p.textContent = 'No structured data available.';
+                             wrapper.appendChild(p);
+                        }
+                    } else {
+                        // Regular field rendering
+                        if (typeof val === 'string' && val.length > 60) {
+                            wrapper.className = 'flex flex-col col-span-2';
+                            const textarea = document.createElement('textarea');
+                            textarea.className = 'bg-gray-800 text-white border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none w-full font-mono resize-y min-h-[100px]';
+                            textarea.value = val;
+                            textarea.readOnly = true;
+                            wrapper.appendChild(textarea);
+                        } else {
+                            const input = document.createElement('input');
+                            input.type = 'text';
+                            input.className = 'bg-gray-800 text-white border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none w-full font-mono';
+                            input.value = typeof val === 'object' ? JSON.stringify(val) : val;
+                            input.readOnly = true;
+                            wrapper.appendChild(input);
+                        }
+                    }
+                    
+                    form.appendChild(wrapper);
+                });
+                
+                modal.style.display = 'flex';
+            };
 
             // Initial render
             switchTab('docs');

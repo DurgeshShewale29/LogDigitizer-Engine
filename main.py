@@ -17,7 +17,9 @@ from fastapi.responses import StreamingResponse
 
 from core.classifier import classify_document, classify_text
 from core.schemas import UploadResponse, SaveRecordRequest, ChatRequest, ChatResponse, LoginRequest, LoginResponse, DeleteRecordsRequest
-from core.database import init_db, save_document, get_documents_by_type, get_all_documents, get_audit_logs, get_document_file, delete_documents, delete_audit_logs
+from core.database import (init_db, save_document, get_documents_by_type, get_all_documents,
+                           get_audit_logs, get_document_file, delete_documents, delete_audit_logs,
+                           get_all_document_types, get_typed_documents, get_typed_table_columns)
 from core.chatbot import process_chat_query
 
 @asynccontextmanager
@@ -53,10 +55,30 @@ def database_view(request: Request):
     """
     records = get_all_documents()
     audit_logs = get_audit_logs()
+    doc_types = get_all_document_types()
     return templates.TemplateResponse(request=request, name="database.html", context={
-        "records": records, 
-        "audit_logs": audit_logs
+        "records": records,
+        "audit_logs": audit_logs,
+        "doc_types": doc_types
     })
+
+
+@app.get("/api/db-schema")
+def db_schema():
+    """
+    Returns all document types and the real SQLite column names for each typed table.
+    Used by the DB explorer to show proper column headers per document type.
+    """
+    doc_types = get_all_document_types()
+    schema = {}
+    for dt in doc_types:
+        rows = get_typed_documents(dt)
+        cols = get_typed_table_columns(dt)
+        schema[dt] = {
+            "columns": cols,
+            "rows": rows
+        }
+    return schema
 
 @app.post("/api/upload", response_model=UploadResponse)
 def upload_document(file: UploadFile = File(...)):

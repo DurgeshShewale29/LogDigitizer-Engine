@@ -76,17 +76,19 @@ def execute_ocr(image_matrix: np.ndarray) -> str:
         logger.error(f"OCR Execution failed: {e}")
         return ""
 
-def extract_table_data(image_matrix: np.ndarray) -> list:
+def extract_table_data(binarized_img: np.ndarray, gray_img: np.ndarray = None) -> list:
     """
-    Uses OpenCV Morphological transformations to detect physical table grids, 
+    Uses OpenCV Morphological transformations to detect physical table grids,
     isolates cell bounding boxes, runs Tesseract cell-by-cell, and builds a JSON structure.
+    Uses binarized image for line detection, gray image for per-cell OCR (better accuracy).
     """
-    if image_matrix is None:
+    if binarized_img is None:
         return []
-    
+    # Use gray for OCR if available (richer tonal range = better accuracy on thin text)
+    ocr_img = gray_img if gray_img is not None else binarized_img
     try:
         # Invert the binarized image: text/lines become white, background black
-        thresh = cv2.bitwise_not(image_matrix)
+        thresh = cv2.bitwise_not(binarized_img)
         
         # Structuring elements
         horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40, 1))
@@ -108,6 +110,22 @@ def extract_table_data(image_matrix: np.ndarray) -> list:
             # Filter noise and huge outer boxes
             if 100 < w * h < 200000 and w > 10 and h > 10:
                 cells.append((x, y, w, h))
+                
+        # Remove parent bounding boxes (boxes that contain smaller valid cells)
+        filtered_cells = []
+        for i, c1 in enumerate(cells):
+            x1, y1, w1, h1 = c1
+            is_parent = False
+            for j, c2 in enumerate(cells):
+                if i == j: continue
+                x2, y2, w2, h2 = c2
+                # If c1 fully contains c2 (with a tiny 2px tolerance)
+                if x1 <= x2 + 2 and y1 <= y2 + 2 and x1 + w1 >= x2 + w2 - 2 and y1 + h1 >= y2 + h2 - 2:
+                    is_parent = True
+                    break
+            if not is_parent:
+                filtered_cells.append(c1)
+        cells = filtered_cells
                 
         if not cells:
             return []
@@ -137,37 +155,55 @@ def extract_table_data(image_matrix: np.ndarray) -> list:
         if len(rows) < 2:
             return [] # No proper table structure
             
-        # Parse text cell-by-cell
-        table_data = []
-        headers = []
-        
-        # First row is headers
+        # Determine columns based on the header row (rows[0])
+        headers_info = []
         for (x, y, w, h) in rows[0]:
-            # Add slight padding for OCR accuracy
-            cell_img = image_matrix[max(0, y-2):y+h+2, max(0, x-2):x+w+2]
+            cx = x + w / 2.0
+            # Crop inwards to avoid black grid lines, then add white padding for Tesseract
+            cell_crop = ocr_img[max(0, y+4):y+h-4, max(0, x+4):x+w-4]
+            if cell_crop.size == 0: continue
+            cell_img = cv2.copyMakeBorder(cell_crop, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=[255, 255, 255])
             text = pytesseract.image_to_string(cell_img, config='--psm 6').strip()
-            # Remove newlines in headers
             text = " ".join(text.split())
-            headers.append(text if text else f"Col_{len(headers)}")
+            if not text:
+                text = f"Col_{len(headers_info)}"
+            headers_info.append({"cx": cx, "text": text})
             
-        # Subsequent rows are values
+        # Ensure headers_info is sorted left-to-right
+        headers_info.sort(key=lambda item: item["cx"])
+        headers = [h["text"] for h in headers_info]
+
+        # Parse subsequent rows matching cells to headers by center-x proximity
+        table_data = []
         for row in rows[1:]:
-            row_dict = {}
+            row_dict = {h: "" for h in headers}
             has_text = False
-            for idx, (x, y, w, h) in enumerate(row):
-                if idx < len(headers):
-                    cell_img = image_matrix[max(0, y-2):y+h+2, max(0, x-2):x+w+2]
-                    text = pytesseract.image_to_string(cell_img, config='--psm 6').strip()
-                    # Remove excessive newlines
-                    text = " ".join(text.split())
-                    row_dict[headers[idx]] = text
-                    if text:
-                        has_text = True
-            
-            # Only append if the row isn't entirely blank
-            if has_text and row_dict:
-                table_data.append(row_dict)
+            for (x, y, w, h) in row:
+                cx = x + w / 2.0
+                # Find closest header index
+                closest_idx = min(range(len(headers_info)), key=lambda i: abs(headers_info[i]["cx"] - cx))
+                header_text = headers[closest_idx]
                 
+                # Crop inwards to avoid black grid lines, then add white padding
+                cell_crop = ocr_img[max(0, y+4):y+h-4, max(0, x+4):x+w-4]
+                if cell_crop.size > 0:
+                    cell_img = cv2.copyMakeBorder(cell_crop, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+                    text = pytesseract.image_to_string(cell_img, config='--psm 6').strip()
+                    text = " ".join(text.split())
+                else:
+                    text = ""
+                
+                if text:
+                    # If multiple cells fall under same header, append
+                    if row_dict[header_text]:
+                        row_dict[header_text] += " " + text
+                    else:
+                        row_dict[header_text] = text
+                    has_text = True
+            
+            if has_text:
+                table_data.append(row_dict)
+
         return table_data
     except Exception as e:
         logger.error(f"Table extraction failed: {e}")
@@ -231,15 +267,8 @@ def classify_text(filename: str, raw_text: str, table_data: list = None) -> Docu
     first corrected for misreads before any parsing begins. Falls back to the
     original raw_text if the SLM is unavailable or returns nothing.
     """
-    # ── SLM Integration Point 1: OCR Post-Correction ─────────────────────────
-    # Attempt to fix digit/letter confusions and garbled words before parsing.
-    # This runs before key-value extraction so corrected text improves all
-    # downstream fields, not just the hardcoded 3 cases.
-    slm_corrected = correct_ocr_text(raw_text)
-    if slm_corrected:
-        raw_text = slm_corrected
-        logger.info("SLM: OCR post-correction applied.")
-    # ─────────────────────────────────────────────────────────────────────────
+    # SLM OCR post-correction is removed — TinyLlama 1.1B is unreliable on long text.
+    # Per-field rule-based corrections below (lines ~298-308) handle known misreads.
 
     text_lower = raw_text.lower()
     lines = raw_text.split('\n')
@@ -250,26 +279,50 @@ def classify_text(filename: str, raw_text: str, table_data: list = None) -> Docu
     dynamic_data = {}
     leftover_lines = []
     
-    # 1. Delimiter Parsing
+    # 1. Delimiter Parsing — handles multi-field layouts on a single OCR line.
+    # Strategy: Use a regex to find ALL "Key:" positions on each line, then
+    # slice the value between each key position. This works even when Tesseract
+    # outputs only single spaces between columns (which breaks whitespace-split).
+    #
+    # Matches 1-2 Title-Case words followed by a colon:
+    #   "Date:"  "Shift ID:"  "Outgoing Operator:"  "Additional Notes:"
+    _KEY_FINDER = re.compile(r'\b([A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*)?)\s*:')
+    _BLANK_VAL  = re.compile(r'^[\s_\-]+$')   # blank form field underscores
+    _TABLE_LINE = re.compile(r'\||\[')         # table rows with pipe/bracket chars
+
+    # Lines that start with an equipment tag (PSV-101, HEX-220, PMP-330 etc.)
+    # These are OCR table data rows — must NEVER be appended to key values.
+    _EQUIPMENT_ROW = re.compile(r'^[A-Z]{2,5}-\d{2,4}\b')
+
+    # Lines that are exactly 2-5 Title Case words with no colon — table header rows
+    _TABLE_HEADER = re.compile(r'^([A-Z][a-zA-Z]+)(\s+[A-Z][a-zA-Z]+){1,4}$')
+
     last_key = None
     for line in lines:
         line_clean = line.strip()
         if not line_clean:
             continue
-            
-        # Try to find delimiters: ':-', ' - ', or ':'
-        delimiter_found = False
-        for delim in [':-', ' - ', ':']:
-            if delim in line_clean:
-                parts = line_clean.split(delim, 1)
-                key = parts[0].strip()
-                val = parts[1].strip()
-                
+
+        matches = list(_KEY_FINDER.finditer(line_clean))
+
+        if matches:
+            any_kv_found = False
+            for i, m in enumerate(matches):
+                key = m.group(1).strip()
+                val_start = m.end()
+                val_end   = matches[i + 1].start() if i + 1 < len(matches) else len(line_clean)
+                val       = line_clean[val_start:val_end].strip()
+
+                # Skip blank form-field placeholders (underscores, dashes)
+                if _BLANK_VAL.match(val) if val else True:
+                    if not val:
+                        continue
+
                 # OCR Spelling Autocorrect for Common Keys
                 if key.lower() == "pate": key = "Date"
                 elif key.lower() == "tine": key = "Time"
                 elif key.lower() == "nane": key = "Name"
-                
+
                 # OCR Spelling Autocorrect for Common Values
                 if key == "Date":
                     val = val.replace("42-", "12-")
@@ -277,16 +330,35 @@ def classify_text(filename: str, raw_text: str, table_data: list = None) -> Docu
                     val = val.replace("93:", "08:")
                 elif key == "Pump Number":
                     val = val.replace("'", "").strip()
-                
-                # Ensure the key is somewhat reasonable length (not a massive sentence)
-                if 0 < len(key) < 25:
+
+                # Strip trailing underscores/dashes from values (OCR artifact from printed form lines)
+                val = re.sub(r'[\s_\-]+$', '', val).strip()
+
+                # Store only if key length is reasonable and value is non-empty
+                if 0 < len(key) < 25 and val and not _BLANK_VAL.match(val):
                     dynamic_data[key] = val
                     last_key = key
-                    delimiter_found = True
-                    break
-        
-        if not delimiter_found:
-            if last_key:
+                    any_kv_found = True
+
+            if not any_kv_found:
+                # No key found on this line — decide if it is a table row or continuation
+                is_table = (
+                    _TABLE_LINE.search(line_clean)
+                    or _EQUIPMENT_ROW.match(line_clean)
+                    or _TABLE_HEADER.match(line_clean)
+                )
+                if last_key and not is_table:
+                    dynamic_data[last_key] += " " + line_clean
+                else:
+                    leftover_lines.append(line_clean)
+        else:
+            # No key pattern found — treat as continuation or leftover
+            is_table = (
+                _TABLE_LINE.search(line_clean)
+                or _EQUIPMENT_ROW.match(line_clean)
+                or _TABLE_HEADER.match(line_clean)
+            )
+            if last_key and not is_table:
                 dynamic_data[last_key] += " " + line_clean
             else:
                 leftover_lines.append(line_clean)
@@ -300,33 +372,63 @@ def classify_text(filename: str, raw_text: str, table_data: list = None) -> Docu
     if entities["shift_ids"] and "Shift ID" not in dynamic_data:
         dynamic_data["Shift ID"] = entities["shift_ids"][0]
         
-    # 3. Clean leftovers of matched entities and giant headers
-    raw_leftovers = " ".join(leftover_lines)
+    # 3. Clean leftovers — filter out table rows, headers, and document titles
+    _HEADER_RE = re.compile(
+        r'^(shift\s+handover|tool\s+broken|general\s+asset|iocl|unit\s+\d+|'
+        r'outgoing\s+operator|incoming\s+operator|reference\s+id)',
+        re.IGNORECASE
+    )
+    filtered_leftovers = [
+        ln for ln in leftover_lines
+        if len(ln) >= 15
+        and not ln.isupper()
+        and not _HEADER_RE.match(ln)
+        and not _TABLE_LINE.search(ln)      # no pipe/bracket lines
+        and not _EQUIPMENT_ROW.match(ln)    # no equipment tag data rows
+        and not _TABLE_HEADER.match(ln)     # no table header rows
+    ]
+    raw_leftovers = " ".join(filtered_leftovers)
     cleaned_notes = clean_leftover_text(raw_leftovers, entities)
 
     if cleaned_notes:
         # ── SLM Integration Point 2: Notes Summarization ──────────────────
-        # Replace the raw text blob with a clean 2-3 sentence summary.
-        # Falls back to storing raw cleaned_notes if SLM is unavailable.
+        # GUARD: TinyLlama sometimes echoes the system prompt instead of
+        # generating a real summary. Discard if it looks like a prompt echo.
         slm_summary = summarize_notes(cleaned_notes)
-        dynamic_data["Log Notes"] = slm_summary if slm_summary else cleaned_notes
         if slm_summary:
-            logger.info("SLM: Log notes summarized.")
+            _PROMPT_ECHO_CLUES = (
+                "preserve all important", "technical details",
+                "equipment names", "return only the summary",
+                "tag numbers", "fault descriptions",
+                "personnel names", "i will summarize",
+            )
+            is_prompt_echo = any(clue in slm_summary.lower() for clue in _PROMPT_ECHO_CLUES)
+            dynamic_data["Log Notes"] = cleaned_notes if is_prompt_echo else slm_summary
+            if is_prompt_echo:
+                logger.warning("SLM: Summary discarded (model echoed system prompt). Using raw notes.")
+            else:
+                logger.info("SLM: Log notes summarized.")
+        else:
+            dynamic_data["Log Notes"] = cleaned_notes
         # ─────────────────────────────────────────────────────────────────
         
     # 4. Generate dynamic FormFields
     fields = []
     for key, value in dynamic_data.items():
-        if not value: 
+        # Skip empty or non-string values (lists/dicts must not leak into text inputs)
+        if not value or not isinstance(value, str):
             continue
-            
-        # Normalize key for id
-        field_id = key.lower().replace(" ", "_").replace("-", "_")
-        # Ensure only alphanumeric and underscores in ID
-        field_id = re.sub(r'\W+', '', field_id)
-        
-        field_type = "textarea" if len(value) > 50 else "text"
-        
+        value = value.strip()
+        if not value:
+            continue
+
+        # Sanitize key into a safe HTML id/name: spaces and specials → underscores
+        field_id = re.sub(r'[^\w]', '_', key.lower()).strip('_')
+        # Collapse multiple consecutive underscores
+        field_id = re.sub(r'_+', '_', field_id)
+
+        field_type = "textarea" if len(value) > 80 else "text"
+
         fields.append(
             FormField(
                 id=field_id,
@@ -351,23 +453,21 @@ def classify_text(filename: str, raw_text: str, table_data: list = None) -> Docu
                 )
             )
         
-    # Document Type heuristic based on text
-    if "shift" in text_lower or "handover" in text_lower or "sh-" in text_lower:
-        doc_type = "Shift Handover Log"
-    elif "tool" in text_lower or "broken" in text_lower or "incident" in text_lower:
-        doc_type = "Tool Broken Report"
-    elif "asset" in text_lower or "psv-" in text_lower:
-        doc_type = "General Asset Log"
-    else:
-        # ── SLM Integration Point 3: Contextual Document Classification ───
-        # Keyword matching failed. Ask the SLM to classify from full context.
-        # This handles non-standard formats, badly scanned docs, and new
-        # document types without keyword matches.
-        slm_doc_type = classify_document_type(raw_text)
-        doc_type = slm_doc_type if slm_doc_type else "Dynamic Document"
-        if slm_doc_type:
-            logger.info("SLM: Document classified as '%s'.", slm_doc_type)
-        # ─────────────────────────────────────────────────────────────────
+    # Document Type — expanded keyword priority dict (rule-based, no SLM)
+    # Priority: most-specific types first.
+    _DOC_TYPE_RULES = [
+        ("Shift Handover Log",  ["shift", "handover", "sh-", "outgoing operator",
+                                  "incoming operator", "shift id"]),
+        ("Tool Broken Report",  ["tool", "broken", "fault report", "incident",
+                                  "damage", "repair", "breakdown"]),
+        ("General Asset Log",   ["asset", "psv-", "maintenance log", "inspection log",
+                                  "equipment log", "work order"]),
+    ]
+    doc_type = "Dynamic Document"
+    for type_name, keywords in _DOC_TYPE_RULES:
+        if any(kw in text_lower for kw in keywords):
+            doc_type = type_name
+            break
 
     confidence = 0.95 if len(raw_text) > 20 else 0.40 # Simple heuristic
 
@@ -390,8 +490,8 @@ def classify_document(filename: str, file_bytes: bytes) -> DocumentSchema:
     binarized_img = preprocessed["binarized"]
     gray_img = preprocessed["gray"]
     
-    # 2. Extract Tabular Data
-    table_data = extract_table_data(binarized_img)
+    # 2. Extract Tabular Data — pass both images; gray is used for cell OCR
+    table_data = extract_table_data(binarized_img, gray_img)
     
     # 3. Extract Text via standard OCR
     raw_text = execute_ocr(gray_img)

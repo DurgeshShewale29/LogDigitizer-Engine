@@ -349,6 +349,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 table.appendChild(tbody);
                 tableContainer.appendChild(table);
                 
+                // Add a hidden input so the form serializer picks up the table data
+                const hiddenInput = document.createElement('input');
+                hiddenInput.type = 'hidden';
+                hiddenInput.name = field.id;
+                hiddenInput.value = JSON.stringify(field.value);
+                wrapper.appendChild(hiddenInput);
+                
                 // Keep inputElement reference so we can set ID/Name
                 inputElement = tableContainer;
             } else {

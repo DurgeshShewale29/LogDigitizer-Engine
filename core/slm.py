@@ -70,7 +70,7 @@ _SERVER_HOST = "127.0.0.1"
 _SERVER_PORT = 8080
 _BASE_URL    = f"http://{_SERVER_HOST}:{_SERVER_PORT}"
 
-_INFERENCE_TIMEOUT = 30  # seconds per request
+_INFERENCE_TIMEOUT = 15  # seconds per request (lowered for faster uploads on CPU)
 
 
 # ── Subprocess Management ─────────────────────────────────────────────────────
@@ -230,6 +230,49 @@ def _chat(system: str, user: str, max_tokens: int = 256, temperature: float = 0.
         return None
 
 
+def _chat_json(system: str, user: str, max_tokens: int = 150) -> Optional[dict]:
+    """
+    Like _chat() but requests constrained JSON output via llama.cpp
+    response_format. Parses and returns a dict, or None on any error.
+    Requires llama-server build >= b3000 for response_format support.
+    """
+    if not _slm_available:
+        return None
+
+    payload = json.dumps({
+        "model":    "tinyllama",
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user",   "content": user},
+        ],
+        "max_tokens":      max_tokens,
+        "temperature":     0.05,
+        "stream":          False,
+        "response_format": {"type": "json_object"},
+    }).encode("utf-8")
+
+    try:
+        req = urllib.request.Request(
+            f"{_BASE_URL}/v1/chat/completions",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=_INFERENCE_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode())
+            text = data["choices"][0]["message"]["content"].strip()
+            if not text:
+                return None
+            start = text.find("{")
+            end   = text.rfind("}") + 1
+            if start == -1 or end == 0:
+                return None
+            return json.loads(text[start:end])
+    except Exception as exc:
+        logger.error("SLM: JSON chat error: %s", exc)
+        return None
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def is_available() -> bool:
@@ -239,75 +282,45 @@ def is_available() -> bool:
 
 def correct_ocr_text(raw_text: str) -> Optional[str]:
     """
-    Uses the SLM to dynamically correct OCR errors in extracted document text.
-    Returns corrected text, or None if SLM unavailable / text too short.
+    DEPRECATED — Full-text OCR correction is unreliable with TinyLlama 1.1B.
+    Per-field rule-based corrections in classifier.py handle common misreads.
+    Retained for API compatibility. Always returns None.
     """
-    if not _slm_available or not raw_text or len(raw_text.strip()) < 10:
-        return None
-
-    system = (
-        "You are an OCR correction assistant for industrial facility log documents. "
-        "Your ONLY job is to fix obvious OCR misreads such as digit/letter confusions "
-        "('0' vs 'O', '1' vs 'l', '5' vs 'S') and garbled words caused by image noise. "
-        "Do NOT add new information. Do NOT remove real content. "
-        "Preserve all formatting, line breaks, and structure. "
-        "Return ONLY the corrected text. No preamble, no explanation."
-    )
-    user = f"Fix OCR errors in this industrial log text:\n\n{raw_text[:800]}"
-    return _chat(system, user, max_tokens=600, temperature=0.05)
+    return None
 
 
 def classify_document_type(text: str) -> Optional[str]:
     """
-    Uses the SLM to classify a document by reading its full context.
-    Returns one of the 4 valid type strings, or None if SLM unavailable.
+    DEPRECATED — Replaced by expanded keyword heuristic in classifier.py.
+    TinyLlama 1.1B was unreliable for structural/classification decisions.
+    Retained for API compatibility. Always returns None.
     """
-    if not _slm_available or not text or len(text.strip()) < 10:
-        return None
-
-    _VALID_TYPES = [
-        "Shift Handover Log",
-        "Tool Broken Report",
-        "General Asset Log",
-        "Dynamic Document",
-    ]
-
-    system = (
-        "You are a document classifier for an industrial plant facility. "
-        "Classify the given document text into EXACTLY one of these four types:\n"
-        "  - Shift Handover Log\n"
-        "  - Tool Broken Report\n"
-        "  - General Asset Log\n"
-        "  - Dynamic Document\n"
-        "Return ONLY the type name. No explanation. No punctuation."
-    )
-    user = f"Classify this document:\n\n{text[:600]}"
-    result = _chat(system, user, max_tokens=20, temperature=0.0)
-
-    if result:
-        for valid_type in _VALID_TYPES:
-            if valid_type.lower() in result.lower():
-                return valid_type
     return None
 
 
 def summarize_notes(raw_notes: str) -> Optional[str]:
     """
-    Uses the SLM to distil unstructured log notes into a clean 2-3 sentence summary.
-    Returns a summary string, or None if SLM unavailable / notes too short.
+    Uses the SLM to distil unstructured log notes into a clean summary.
+    Uses constrained JSON output (response_format=json_object) so TinyLlama
+    is forced to emit {"summary": "..."} — prevents hallucination wrapping.
+    Returns the summary string, or None if SLM unavailable / too short.
     """
     if not _slm_available or not raw_notes or len(raw_notes.strip()) < 30:
         return None
 
     system = (
-        "You are a technical summarizer for industrial plant log notes. "
+        "You are a technical log summarizer for an industrial plant. "
         "Summarize the following notes in 2-3 concise sentences. "
-        "Preserve all important technical details: equipment names, tag numbers, "
-        "actions taken, fault descriptions, and personnel names. "
-        "Return ONLY the summary. No preamble. No bullet points."
+        "Keep all equipment tags, personnel names, and action details. "
+        'Return ONLY valid JSON in this exact format: {"summary": "<your summary here>"}'
     )
-    user = f"Summarize these log notes:\n\n{raw_notes[:600]}"
-    return _chat(system, user, max_tokens=180, temperature=0.2)
+    user = f"Notes:\n\n{raw_notes[:500]}"
+
+    result = _chat_json(system, user, max_tokens=120)
+    if not result:
+        return None
+    summary = str(result.get("summary", "")).strip()
+    return summary if len(summary) > 20 else None
 
 
 def translate_to_sql_filters(query: str) -> Optional[Dict]:
